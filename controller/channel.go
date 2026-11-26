@@ -1112,6 +1112,16 @@ func UpdateChannel(c *gin.Context) {
 	originProxy := originChannel.GetSetting().Proxy
 	proxyChanged := false
 	_, settingProvided := requestData["setting"]
+	// The channel cost ratio is managed by tooling, not by the admin form, so a
+	// regular save that omits it must not silently wipe it.
+	if settingProvided {
+		originSetting := originChannel.GetSetting()
+		newSetting := channel.GetSetting()
+		if newSetting.ChannelCostRatio <= 0 && originSetting.ChannelCostRatio > 0 {
+			newSetting.ChannelCostRatio = originSetting.ChannelCostRatio
+			channel.SetSetting(newSetting)
+		}
+	}
 	if settingProvided {
 		newProxy, _ := service.NormalizeProxyURL(channel.GetSetting().Proxy)
 		normalizedOriginProxy, originProxyErr := service.NormalizeProxyURL(originProxy)

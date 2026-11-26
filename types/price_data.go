@@ -19,6 +19,9 @@ type GroupRatioInfo struct {
 	GroupRatio        float64
 	GroupSpecialRatio float64
 	HasSpecialRatio   bool
+	// ChannelCostRatio is the per-channel multiplier folded into GroupRatio for
+	// this request. Zero means no channel-level override was configured.
+	ChannelCostRatio float64
 }
 
 type PriceData struct {

@@ -42,6 +42,11 @@ type Pricing struct {
 	AudioRatio             *float64                             `json:"audio_ratio,omitempty"`
 	AudioCompletionRatio   *float64                             `json:"audio_completion_ratio,omitempty"`
 	EnableGroup            []string                             `json:"enable_groups"`
+	// GroupRatio carries the effective ratio per enabled group, i.e. the group
+	// ratio folded with the cheapest channel cost ratio available for this
+	// model in that group. The model square prices from it so the shown price
+	// matches what the request is actually billed.
+	GroupRatio             map[string]float64                   `json:"group_ratio,omitempty"`
 	SupportedEndpointTypes []constant.EndpointType              `json:"supported_endpoint_types"`
 	BillingMode            string                               `json:"billing_mode,omitempty"`
 	BillingExpr            string                               `json:"billing_expr,omitempty"`
@@ -229,6 +234,11 @@ func updatePricing() {
 
 	modelGroupsMap := make(map[string]*types.Set[string])
 
+	// Cheapest channel cost ratio per (model, group): the price shown in the
+	// model square must be the price the cheapest servable channel charges.
+	channelCostRatios := loadChannelCostRatios()
+	minChannelRatio := make(map[string]map[string]float64)
+
 	for _, ability := range enableAbilities {
 		groups, ok := modelGroupsMap[ability.Model]
 		if !ok {
@@ -236,6 +246,19 @@ func updatePricing() {
 			modelGroupsMap[ability.Model] = groups
 		}
 		groups.Add(ability.Group)
+
+		ratio, ok := channelCostRatios[ability.ChannelId]
+		if !ok || ratio <= 0 {
+			ratio = 1
+		}
+		byGroup, ok := minChannelRatio[ability.Model]
+		if !ok {
+			byGroup = make(map[string]float64)
+			minChannelRatio[ability.Model] = byGroup
+		}
+		if current, exists := byGroup[ability.Group]; !exists || ratio < current {
+			byGroup[ability.Group] = ratio
+		}
 	}
 
 	//这里使用切片而不是Set，因为一个模型可能支持多个端点类型，并且第一个端点是优先使用端点
@@ -330,6 +353,13 @@ func updatePricing() {
 			ModelName:              model,
 			EnableGroup:            groups.Items(),
 			SupportedEndpointTypes: modelSupportEndpointTypes[model],
+		}
+		if byGroup, ok := minChannelRatio[model]; ok && len(byGroup) > 0 {
+			effective := make(map[string]float64, len(byGroup))
+			for group, channelRatio := range byGroup {
+				effective[group] = ratio_setting.GetGroupRatio(group) * channelRatio
+			}
+			pricing.GroupRatio = effective
 		}
 
 		// 补充模型元数据（描述、标签、供应商、状态）
@@ -449,4 +479,19 @@ func updatePricing() {
 // GetSupportedEndpointMap 返回全局端点到路径的映射
 func GetSupportedEndpointMap() map[string]common.EndpointInfo {
 	return supportedEndpointMap
+}
+
+// loadChannelCostRatios reads the per-channel cost ratio used by settlement so
+// the model square can show the same number the request will be billed.
+func loadChannelCostRatios() map[int]float64 {
+	ratios := make(map[int]float64)
+	var channels []Channel
+	if err := DB.Select("id", "setting").Find(&channels).Error; err != nil {
+		common.SysLog(common.LogText("load channel cost ratios failed: %v", err))
+		return ratios
+	}
+	for i := range channels {
+		ratios[channels[i].Id] = channels[i].GetSetting().EffectiveCostRatio()
+	}
+	return ratios
 }

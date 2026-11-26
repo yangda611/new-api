@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -57,6 +58,19 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 	} else {
 		// normal group ratio
 		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
+	}
+
+	// Channel-level cost ratio: several upstreams can share one group (and one
+	// visible price) while each settles at its own multiplier. Folding it into
+	// GroupRatio keeps every billing path (ratio, per-call price, tiered expr)
+	// consistent, including the quota written to logs.
+	if channelSetting, ok := common.GetContextKeyType[dto.ChannelSettings](ctx, constant.ContextKeyChannelSetting); ok {
+		if costRatio := channelSetting.EffectiveCostRatio(); costRatio != 1 {
+			groupRatioInfo.ChannelCostRatio = costRatio
+			groupRatioInfo.GroupRatio *= costRatio
+			logger.LogDebug(ctx, "channel cost ratio applied: channel_id=%d, cost_ratio=%.4f, group_ratio=%.4f",
+				common.GetContextKeyInt(ctx, constant.ContextKeyChannelId), costRatio, groupRatioInfo.GroupRatio)
+		}
 	}
 
 	return groupRatioInfo

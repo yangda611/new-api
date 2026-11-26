@@ -35,6 +35,19 @@ type ChannelSettings struct {
 	// TLSInsecureSkipVerify accepts upstream certificates that fail
 	// verification, such as self-signed ones, for this channel only.
 	TLSInsecureSkipVerify bool `json:"tls_insecure_skip_verify,omitempty"`
+	// ChannelCostRatio multiplies the group ratio for requests served by this
+	// channel, so several upstreams can share one group (and one visible price)
+	// while each carries its own settled price. Zero means disabled.
+	ChannelCostRatio float64 `json:"channel_cost_ratio,omitempty"`
+}
+
+// EffectiveCostRatio returns the multiplier folded into the group ratio for a
+// request served by this channel. Non-positive values mean "not configured".
+func (s ChannelSettings) EffectiveCostRatio() float64 {
+	if s.ChannelCostRatio <= 0 {
+		return 1
+	}
+	return s.ChannelCostRatio
 }
 
 // BindsTaskPlugin reports whether the channel is bound to the task plugin,
